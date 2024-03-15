@@ -127,6 +127,8 @@ type Server struct {
 	ServerErrorFunc func(res *protocol.Message, err error) string
 
 	ViewManager *ViewManager
+
+	handleRequestErrorLogTime time.Time
 }
 
 // NewServer returns a server.
@@ -593,7 +595,12 @@ func (s *Server) processOneRequest(ctx *share.Context, req *protocol.Message, co
 		if s.HandleServiceError != nil {
 			s.HandleServiceError(err)
 		} else {
-			log.Warnf("rpcx: failed to handle request: %v", err)
+			now := time.Now()
+			// No longer log the error for a minute once a log is printed.
+			if s.handleRequestErrorLogTime.Add(time.Minute).Before(now) {
+				s.handleRequestErrorLogTime = now
+				log.Warnf("rpcx: failed to handle request: %v", err)
+			}
 		}
 	}
 
