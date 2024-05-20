@@ -28,6 +28,8 @@ const (
 	WeightedICMP
 	// ConsistentHash is selecting by hashing
 	ConsistentHash
+	// WeightedLatency is selecting by weighted Call Latency
+	WeightedLatency
 	// Closest is selecting the closest server
 	Closest
 

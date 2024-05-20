@@ -11,10 +11,12 @@ import (
 	"os"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/influxdata/tdigest"
 	"github.com/juju/ratelimit"
 	ex "github.com/smallnest/rpcx/errors"
 	"github.com/smallnest/rpcx/log"
@@ -80,6 +82,37 @@ type KVPair struct {
 	Value string
 }
 
+type tDigestWrapper struct {
+	sync.Mutex
+	td        *tdigest.TDigest
+	readCount int
+}
+
+func newTDigestWrapper() *tDigestWrapper {
+	return &tDigestWrapper{
+		td: tdigest.New(),
+	}
+}
+
+func (w *tDigestWrapper) add(value float64) {
+	w.Lock()
+	defer w.Unlock()
+	w.td.Add(value, 1)
+}
+
+func (w *tDigestWrapper) quantile(percentile float64) float64 {
+	w.Lock()
+	defer func() {
+		w.readCount++
+		if w.readCount >= 64 {
+			w.readCount = 0
+			w.td.Reset()
+		}
+		w.Unlock()
+	}()
+	return w.td.Quantile(percentile)
+}
+
 type xClient struct {
 	failMode     FailMode
 	selectMode   SelectMode
@@ -108,6 +141,10 @@ type xClient struct {
 	ch chan []*KVPair
 
 	serverMessageChan chan<- *protocol.Message
+
+	latencies     map[string]*tDigestWrapper
+	latenciesLock sync.RWMutex
+	recordLatency bool
 }
 
 // NewXClient creates a XClient that supports service discovery and service governance.
@@ -119,6 +156,7 @@ func NewXClient(servicePath string, failMode FailMode, selectMode SelectMode, di
 		servicePath:     servicePath,
 		cachedClient:    make(map[string]RPCClient),
 		unstableServers: make(map[string]time.Time),
+		recordLatency:   selectMode == WeightedLatency,
 		option:          option,
 	}
 
@@ -133,6 +171,15 @@ func NewXClient(servicePath string, failMode FailMode, selectMode SelectMode, di
 	filterByStateAndGroup(client.option.Group, servers)
 
 	client.servers = servers
+
+	if client.recordLatency {
+		latencies := make(map[string]*tDigestWrapper, len(pairs))
+		for _, p := range pairs {
+			latencies[p.Key] = newTDigestWrapper()
+		}
+		client.latencies = latencies
+	}
+
 	if selectMode != Closest && selectMode != SelectByUser {
 		client.selector = newSelector(selectMode, servers)
 	}
@@ -219,6 +266,7 @@ func (c *xClient) watch(ch chan []*KVPair) {
 		}
 		c.mu.Lock()
 		filterByStateAndGroup(c.option.Group, servers)
+		c.updateWeightedLatencyMetadata(servers)
 		c.servers = servers
 
 		if c.selector != nil {
@@ -226,6 +274,39 @@ func (c *xClient) watch(ch chan []*KVPair) {
 		}
 
 		c.mu.Unlock()
+	}
+}
+
+func (c *xClient) updateWeightedLatencyMetadata(servers map[string]string) {
+	if !c.recordLatency {
+		return
+	}
+	for k, v := range servers {
+		var (
+			wrapper *tDigestWrapper
+			ok      bool
+		)
+		if wrapper, ok = c.latencies[k]; !ok {
+			wrapper = newTDigestWrapper()
+			c.latenciesLock.Lock()
+			c.latencies[k] = wrapper
+			c.latenciesLock.Unlock()
+		}
+		quantile := wrapper.quantile(0.95)
+		quantileStr := strconv.FormatFloat(quantile, 'f', -1, 64)
+		if v == "" {
+			servers[k] = "latency=" + quantileStr
+		} else {
+			servers[k] = v + "&latency=" + quantileStr
+		}
+	}
+	// Clear data
+	for k := range c.latencies {
+		if _, ok := servers[k]; !ok {
+			c.latenciesLock.Lock()
+			delete(c.latencies, k)
+			c.latenciesLock.Unlock()
+		}
 	}
 }
 
@@ -546,6 +627,18 @@ func (c *xClient) Call(ctx context.Context, serviceMethod string, args interface
 	}
 
 	var e error
+
+	if c.recordLatency {
+		start := time.Now()
+		defer func() {
+			c.latenciesLock.RLock()
+			defer c.latenciesLock.RUnlock()
+			if td, ok := c.latencies[k]; ok {
+				td.add(float64(time.Since(start).Milliseconds()))
+			}
+		}()
+	}
+
 	switch c.failMode {
 	case Failtry:
 		retries := c.option.Retries

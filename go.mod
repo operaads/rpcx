@@ -20,6 +20,7 @@ require (
 	github.com/grandcat/zeroconf v1.0.0
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/hashicorp/golang-lru v0.5.4
+	github.com/influxdata/tdigest v0.0.1
 	github.com/jamiealquiza/tachymeter v2.0.0+incompatible
 	github.com/json-iterator/go v1.1.12
 	github.com/juju/ratelimit v1.0.2
