@@ -318,3 +318,106 @@ func (s *consistentHashSelector) UpdateServer(servers map[string]string) {
 	}
 	s.servers = ss
 }
+
+// weightedLatencySelector selects servers with Latency result.
+type weightedLatencySelector struct {
+	servers []*Weighted
+}
+
+func newWeightedLatencySelector(servers map[string]string) Selector {
+	ss := createLatencyWeighted(servers)
+	return &weightedLatencySelector{servers: ss}
+}
+
+func (s weightedLatencySelector) Select(ctx context.Context, servicePath, serviceMethod string, args interface{}) string {
+	ss := s.servers
+	if len(ss) == 0 {
+		return ""
+	}
+	w := nextWeighted(ss)
+	if w == nil {
+		return ""
+	}
+	return w.Server
+}
+
+func (s *weightedLatencySelector) UpdateServer(servers map[string]string) {
+	ss := createLatencyWeighted(servers)
+	s.servers = ss
+}
+
+func createLatencyWeighted(servers map[string]string) []*Weighted {
+	var (
+		ss        = make([]*Weighted, 0, len(servers))
+		latencies = make(map[string]float64, len(servers))
+		sum       float64
+		count     int
+		mean      float64
+	)
+
+	for k, metadata := range servers {
+		var latency float64
+		if v, err := url.ParseQuery(metadata); err == nil {
+			latency, _ = strconv.ParseFloat(v.Get("latency"), 64)
+		}
+		latencies[k] = latency
+		if latency > 0 {
+			sum += latency
+			count++
+		}
+	}
+
+	if count > 0 {
+		mean = sum / float64(count)
+	}
+
+	for k, latency := range latencies {
+		w := &Weighted{Server: k, Weight: 100, EffectiveWeight: 100}
+		if latency > 0 {
+			weight := int(mean / latency * 100)
+			if weight < 1 {
+				weight = 1
+			}
+			if weight > 500 {
+				weight = 500
+			}
+			w.Weight = weight
+			w.EffectiveWeight = weight
+		}
+		ss = append(ss, w)
+	}
+
+	return ss
+}
+
+// https://github.com/phusion/nginx/commit/27e94984486058d73157038f7950a0a36ecc6e35
+func nextWeighted(servers []*Weighted) (best *Weighted) {
+	total := 0
+
+	for i := 0; i < len(servers); i++ {
+		w := servers[i]
+
+		if w == nil {
+			continue
+		}
+		// if w is down, continue
+
+		w.CurrentWeight += w.EffectiveWeight
+		total += w.EffectiveWeight
+		if w.EffectiveWeight < w.Weight {
+			w.EffectiveWeight++
+		}
+
+		if best == nil || w.CurrentWeight > best.CurrentWeight {
+			best = w
+		}
+
+	}
+
+	if best == nil {
+		return nil
+	}
+
+	best.CurrentWeight -= total
+	return best
+}
