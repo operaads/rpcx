@@ -103,6 +103,7 @@ func (w *tDigestWrapper) add(value float64) {
 func (w *tDigestWrapper) quantile(percentile float64) float64 {
 	w.Lock()
 	defer func() {
+		// TODO: better algorithm
 		w.readCount++
 		if w.readCount >= 64 {
 			w.readCount = 0

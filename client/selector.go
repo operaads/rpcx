@@ -35,6 +35,8 @@ func newSelector(selectMode SelectMode, servers map[string]string) Selector {
 		return newWeightedICMPSelector(servers)
 	case ConsistentHash:
 		return newConsistentHashSelector(servers)
+	case WeightedLatency:
+		return newWeightedLatencySelector(servers)
 	case SelectByUser:
 		return nil
 	default:
@@ -329,7 +331,7 @@ func newWeightedLatencySelector(servers map[string]string) Selector {
 	return &weightedLatencySelector{servers: ss}
 }
 
-func (s weightedLatencySelector) Select(ctx context.Context, servicePath, serviceMethod string, args interface{}) string {
+func (s *weightedLatencySelector) Select(ctx context.Context, servicePath, serviceMethod string, args interface{}) string {
 	ss := s.servers
 	if len(ss) == 0 {
 		return ""
