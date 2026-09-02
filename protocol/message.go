@@ -12,7 +12,7 @@ import (
 	"github.com/smallnest/rpcx/util"
 )
 
-var bufferPool = util.NewLimitedPool(512, 4096)
+var bufferPool = util.NewLimitedPool(512, 131072)
 
 // Compressors are compressors supported by rpcx. You can add customized compressor in Compressors.
 var Compressors = map[CompressType]Compressor{
