@@ -12,7 +12,8 @@ import (
 	"github.com/smallnest/rpcx/util"
 )
 
-var bufferPool = util.NewLimitedPool(512, 131072)
+// bufferPool 复用编码后的消息缓冲；上限按最大单个编码消息 256KB 设定。
+var bufferPool = util.NewLimitedPool(512, 262144)
 
 // Compressors are compressors supported by rpcx. You can add customized compressor in Compressors.
 var Compressors = map[CompressType]Compressor{

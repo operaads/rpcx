@@ -42,8 +42,8 @@ func BenchmarkMessageEncodeSlicePointer(b *testing.B) {
 			b.Run("pool-4KB", func(b *testing.B) {
 				benchmarkMessageEncodeSlicePointer(b, 4096, payloadSize)
 			})
-			b.Run("pool-128KB", func(b *testing.B) {
-				benchmarkMessageEncodeSlicePointer(b, 131072, payloadSize)
+			b.Run("pool-256KB", func(b *testing.B) {
+				benchmarkMessageEncodeSlicePointer(b, 262144, payloadSize)
 			})
 		})
 	}
